@@ -1,0 +1,84 @@
+# Containerfile.ghc - Build GHC 9.2.8 from source on UBI9
+# Base image for cabal and pandoc builds
+#
+# Build: podman build -t ghc:9.2.8-ubi9 -f Containerfile.ghc .
+# Requires: sources/ghc/ghc-9.2.8-src.tar.xz
+
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+ARG GHC_VERSION=9.2.8
+
+# Install build dependencies from UBI9 repos
+RUN dnf -y update && \
+    dnf -y install \
+        gcc \
+        gcc-c++ \
+        make \
+        autoconf \
+        automake \
+        libtool \
+        ncurses-devel \
+        gmp-devel \
+        zlib-devel \
+        xz \
+        xz-devel \
+        perl \
+        python3 \
+        tar \
+        gzip \
+        bzip2 \
+        which \
+        findutils \
+        diffutils \
+        patch \
+        pkg-config \
+        libffi-devel && \
+    dnf clean all
+
+# Enable EPEL ONLY for bootstrap GHC
+RUN dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf -y install ghc && \
+    dnf -y remove epel-release && \
+    rm -rf /var/cache/dnf && \
+    dnf clean all
+
+# Verify bootstrap GHC
+RUN ghc --version
+
+# Copy GHC source
+COPY sources/ghc/ghc-${GHC_VERSION}-src.tar.xz /build/
+
+WORKDIR /build
+
+# Extract GHC source
+RUN tar xf ghc-${GHC_VERSION}-src.tar.xz && \
+    rm ghc-${GHC_VERSION}-src.tar.xz
+
+WORKDIR /build/ghc-${GHC_VERSION}
+
+# Configure and build GHC (disable docs to avoid Haddock issues)
+RUN echo "HADDOCK_DOCS = NO" >> mk/build.mk && \
+    echo "BUILD_SPHINX_HTML = NO" >> mk/build.mk && \
+    echo "BUILD_SPHINX_PDF = NO" >> mk/build.mk && \
+    ./configure --prefix=/opt/ghc && \
+    make -j$(nproc) && \
+    make install
+
+# Remove bootstrap GHC from EPEL
+RUN dnf -y remove ghc ghc-compiler ghc-base* ghc-lib* && \
+    dnf clean all
+
+# Clean up build directory
+RUN rm -rf /build
+
+# Verify GHC installation
+RUN /opt/ghc/bin/ghc --version
+
+# Set up environment
+ENV PATH="/opt/ghc/bin:${PATH}"
+
+# Labels
+LABEL name="ghc" \
+      version="${GHC_VERSION}" \
+      description="GHC ${GHC_VERSION} built from source on UBI9"
+

@@ -1,0 +1,80 @@
+# Containerfile.pandoc - Build pandoc 3.7.0.2 from source
+# Based on cabal:3.10.3.0-ubi9 image
+#
+# Build: podman build -t pandoc:3.7.0.2-ubi9 -f Containerfile.pandoc .
+# Requires:
+#   - cabal:3.10.3.0-ubi9 image (build Containerfile.cabal first)
+#   - sources/pandoc/hackage-packages/*.tar.gz
+#   - sources/pandoc/hackage-index/
+
+ARG CABAL_IMAGE=localhost/cabal:3.10.3.0-ubi9
+FROM ${CABAL_IMAGE} AS builder
+
+ARG PANDOC_VERSION=3.7.0.2
+
+# Copy hackage packages and index
+COPY sources/pandoc/hackage-packages/ /opt/hackage/packages/
+COPY sources/pandoc/hackage-index/ /opt/hackage/
+
+# Set up local hackage repository
+RUN mkdir -p /root/.cabal/packages/local-hackage && \
+    cp /opt/hackage/01-index.tar /root/.cabal/packages/local-hackage/ && \
+    cp /opt/hackage/*.json /root/.cabal/packages/local-hackage/ 2>/dev/null || true
+
+# Create cabal configuration for offline build
+RUN cat > /root/.cabal/config << 'EOF'
+repository local-hackage
+  url: file+noindex:///opt/hackage/packages
+
+jobs: $ncpus
+installdir: /opt/pandoc/bin
+install-method: copy
+
+library-stripping: True
+executable-stripping: True
+EOF
+
+WORKDIR /build
+
+# Extract pandoc-cli source
+RUN mkdir -p /build/pandoc-build && \
+    cd /build/pandoc-build && \
+    tar xf /opt/hackage/packages/pandoc-cli-${PANDOC_VERSION}.tar.gz
+
+WORKDIR /build/pandoc-build/pandoc-cli-${PANDOC_VERSION}
+
+# Copy cabal project file
+COPY pandoc.cabal.project cabal.project
+
+# Build pandoc
+RUN mkdir -p /opt/pandoc/bin && \
+    cabal build --offline -v -j$(nproc) pandoc-cli
+
+# Copy built binary
+RUN find /build -name pandoc -type f -executable -exec cp {} /opt/pandoc/bin/ \;
+
+# Verify pandoc
+RUN /opt/pandoc/bin/pandoc --version
+
+# =============================================================================
+# Create minimal runtime image
+# =============================================================================
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS runtime
+
+# Install minimal runtime dependencies
+RUN microdnf -y install gmp zlib libffi && \
+    microdnf clean all
+
+# Copy pandoc binary from builder
+COPY --from=builder /opt/pandoc/bin/pandoc /usr/local/bin/pandoc
+
+# Verify pandoc works
+RUN pandoc --version
+
+ENTRYPOINT ["pandoc"]
+CMD ["--help"]
+
+LABEL name="pandoc" \
+      version="3.7.0.2" \
+      description="Pandoc 3.7.0.2 built from source on UBI9"
+

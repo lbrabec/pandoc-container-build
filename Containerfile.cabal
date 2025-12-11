@@ -1,0 +1,56 @@
+# Containerfile.cabal - Build cabal-install 3.10.3.0 from source
+# Based on ghc:9.2.8-ubi9 image
+#
+# Build: podman build -t cabal:3.10.3.0-ubi9 -f Containerfile.cabal .
+# Requires: 
+#   - ghc:9.2.8-ubi9 image (build Containerfile.ghc first)
+#   - sources/cabal/cabal-3.10.3.0-src.tar.gz
+#   - sources/cabal/bootstrap-deps/*.tar.gz
+
+ARG GHC_IMAGE=ghc:9.2.8-ubi9
+FROM ${GHC_IMAGE}
+
+ARG CABAL_VERSION=3.10.3.0
+
+# Copy cabal source and bootstrap dependencies
+COPY sources/cabal/cabal-${CABAL_VERSION}-src.tar.gz /build/
+COPY sources/cabal/bootstrap-deps/ /build/bootstrap-deps/
+
+WORKDIR /build
+
+# Extract cabal source
+RUN tar xf cabal-${CABAL_VERSION}-src.tar.gz && \
+    mv cabal-cabal-install-v${CABAL_VERSION} cabal-src && \
+    rm cabal-${CABAL_VERSION}-src.tar.gz
+
+WORKDIR /build/cabal-src
+
+# Copy bootstrap dependencies to expected location
+RUN mkdir -p _build/tarballs && \
+    cp /build/bootstrap-deps/*.tar.gz _build/tarballs/
+
+# Run bootstrap.py with pre-fetched packages
+RUN python3 bootstrap/bootstrap.py \
+        -d bootstrap/linux-9.2.8.json \
+        -w /opt/ghc/bin/ghc \
+        build
+
+# Install cabal binary
+RUN mkdir -p /opt/cabal/bin && \
+    cp _build/bin/cabal /opt/cabal/bin/cabal && \
+    chmod +x /opt/cabal/bin/cabal
+
+# Verify cabal installation
+RUN /opt/cabal/bin/cabal --version
+
+# Clean up build directory
+RUN rm -rf /build
+
+# Set up environment
+ENV PATH="/opt/cabal/bin:/opt/ghc/bin:${PATH}"
+
+# Labels
+LABEL name="cabal" \
+      version="${CABAL_VERSION}" \
+      description="cabal-install ${CABAL_VERSION} built from source on UBI9"
+
