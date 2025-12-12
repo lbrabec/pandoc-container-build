@@ -5,6 +5,8 @@
 Build GHC from source using GHC from EPEL 9 as bootstrap:
 
 ```
+./fetch-ghc.sh
+
 podman build -t ghc:9.2.8-ubi9 -f Containerfile.ghc .
 ```
 
@@ -13,6 +15,8 @@ podman build -t ghc:9.2.8-ubi9 -f Containerfile.ghc .
 Build Cabal from source using image with GHC from previous step:
 
 ```
+./fetch-cabal.sh
+
 podman build -t cabal:3.10.3.0-ubi9 -f Containerfile.cabal .
 ```
 
